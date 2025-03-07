@@ -1,0 +1,314 @@
+---
+title: "Grid-based Sample Selection Process for the 2025 FIES"
+author: "Florante C. Varona"
+subtitle: '*Cagayan De Oro City*'
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_float: true
+    code_folding: hide
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo=FALSE, warning = FALSE, message = FALSE) 
+```
+
+
+# Sample Selection Process
+the sample selection process using Grid-based approach involves the generation of grid ID for the province and assigning each Secondary Sampling Unit (SSU) to a particular Grid prior to the Actual selection process. 
+
+The grid ID will serve as the primary sampling unit (PSU) which will be selected using Probability proportional to size (PPS) with the number of secondary sampling unit (SSUs) within will be the measure of size.
+
+The sample SSUs within the selected PSUs will be selected using a simple random sampling with an oversample of three(3) SSUs to serve as possible sample SSU replacement
+
+
+## Loading of R Library
+For this process the following R library will be used:
+
+* tidyverse
+* flextable
+* ggplot2
+* pps
+* stringr
+* tinytex
+
+
+```{r}
+library(tidyverse)
+library(flextable)
+library(ggplot2)
+library(pps)
+library(stringr)
+library(tinytex)
+
+```
+
+## Grid Sampling Frame Preparation
+
+We load here the CSV file containing the Secondary Sampling Unit (SSU) Frame to prepare the Grid ID as the Primary Sampling Unit (PSU)
+
+* First we load the data
+* second we generate the distribution of SSU by Grid ID for the province
+* Sort the Grid Frame in ascending order to facilitate PPS selection
+
+```{r}
+setwd("F:/flovar 2025/FUNGAS_FIES")
+CDO_SSU_Frame <- read.csv("10_SSU_Frame_Cagayan de Oro.csv")
+CDO_SSU_Frame$count=1
+CDO_uniquehu<-select(CDO_SSU_Frame,c(18,22))
+CDO_uniquehu2<-distinct(CDO_uniquehu)
+CDO_uniquehu2$countSSU<-1
+
+CDO_Grid_Frame<-CDO_uniquehu2 %>%
+  group_by(Grid_no) %>%
+  summarize(totalSSU=sum(countSSU)) 
+CDO_Grid_Frame$TotalSSU_N<-sum(CDO_Grid_Frame$totalSSU)
+ 
+```
+
+There are **`r length(unique(CDO_Grid_Frame$Grid_no))`** different grids in the province
+
+## Summary statistics of Grid
+Here are some summary statistics of the grid (*TotalSSU* variable):
+
+```{r}
+summary(CDO_Grid_Frame$totalSSU)
+sample_size=1536
+average_grid_size=mean(CDO_Grid_Frame$totalSSU)
+total_sample_grid=ceiling(sample_size/average_grid_size)
+```
+
+## PPS Selection of Grid 
+The total number of sample grids is computed as the total sample size requirement for the province/domain divided by the average grid size, that is, measured by the number of SSUs
+
+* The total sample size =  **`r sample_size`** 
+* The average grid size = **`r average_grid_size`**
+* The total number of sample grid = **`r total_sample_grid`**
+
+
+```{r}
+
+set.seed(1)
+sample_grid_ID<-ppss(CDO_Grid_Frame$totalSSU, total_sample_grid)
+sample_grid_ID<-as.data.frame(sample_grid_ID)
+CDO_Grid_Frame$sample_grid_ID<-seq(1, length(CDO_Grid_Frame$Grid_no))
+
+CDO_Grid_Frame2<-left_join(sample_grid_ID, CDO_Grid_Frame)
+CDO_Grid_Frame2$SamplePSU_ID<-as.character(seq(1, length(CDO_Grid_Frame2$Grid_no)))
+
+
+CDO_Grid_Frame2$Prob<-(CDO_Grid_Frame2$totalSSU*length(CDO_Grid_Frame2$Grid_no))/
+  CDO_Grid_Frame2$TotalSSU_N
+
+CDO_Grid_Frame2$PSUwt<-1/CDO_Grid_Frame2$Prob
+
+CDO_Grid_Frame2$CheckN<-sum(CDO_Grid_Frame2$PSUwt*CDO_Grid_Frame2$totalSSU)
+CDO_Grid_Frame3<-select(CDO_Grid_Frame2, c(5,2:4))
+
+```
+
+### List of Sample Grid
+The following are the list of **`r total_sample_grid`** Sample Grids selected for the province 
+
+```{r}
+flextable(CDO_Grid_Frame3)
+```
+
+## Sample Allocation and weighing
+The total initial SSU sample size of **`r sample_size`** is allocated proportionately to the distribution of SSUs in the selected Grid samples
+
+
+```{r}
+SSU_Allocation<-CDO_Grid_Frame2
+SSU_Allocation$TotalSSU_N2<-sum(SSU_Allocation$totalSSU)
+SSU_Allocation$n<-round((SSU_Allocation$totalSSU/SSU_Allocation$TotalSSU_N2)*sample_size)
+SSU_Allocation$n<-ifelse(SSU_Allocation$n<1,1,SSU_Allocation$n)
+SSU_Allocation$replacement<-ifelse((SSU_Allocation$n)+3>SSU_Allocation$totalSSU,
+                                   SSU_Allocation$totalSSU-SSU_Allocation$n,3)
+SSU_Allocation$TotalSSU_n<-sum(SSU_Allocation$n)
+SSU_Allocation$Prob2<-SSU_Allocation$n/SSU_Allocation$totalSSU
+SSU_Allocation$SSUwt<-1/SSU_Allocation$Prob2
+SSU_Allocation$Baseweight<-SSU_Allocation$PSUwt*SSU_Allocation$SSUwt
+SSU_Allocation$ChekN2<-sum(SSU_Allocation$Baseweight*SSU_Allocation$n)
+
+
+SSU_Allocation2<-select(SSU_Allocation,c(5,2,3,9,10,7,14,15))
+
+flextable(SSU_Allocation2)
+```
+
+
+## SSU Sampling Frame Preparation
+The selected Grid Samples are extracted from the SSU Sampling Frame. Below is an example of the extracted SSU Sampling Frame for the drawn grids
+
+```{r}
+CDO_SSU_Sample<-left_join(CDO_uniquehu2, SSU_Allocation2)
+CDO_SSU_Sample2<-subset(CDO_SSU_Sample, is.na(CDO_SSU_Sample$SamplePSU_ID)==FALSE)
+
+CDO_SSU_Sample3<-select(CDO_SSU_Sample2, c(4,2,1,5,7))
+
+
+flextable(head(CDO_SSU_Sample3))
+
+flextable(tail(CDO_SSU_Sample3))
+```
+## Selection of Sample SSUs
+
+This process selects the sample housing units for each of the selected sample grids in the province. Below is the list of selected sample SSUs with corresponding inclusion probability and the final baseweight for every sample SSUs
+
+```{r}
+
+CDO_SSU_Sample3$SamplePSU_ID<-str_pad(CDO_SSU_Sample3$SamplePSU_ID, 2, pad = "0")
+
+CDO_SSU_Sample3<-arrange(CDO_SSU_Sample3, CDO_SSU_Sample3$SamplePSU_ID)
+
+df<-CDO_SSU_Sample3
+
+set.seed(77)
+uniqhu<-c(df[sample(1:62,16),"uniqhu"],
+          df[sample(63:277,55), "uniqhu"],
+          df[sample(278:351,19), "uniqhu"],
+          df[sample(352:623,70), "uniqhu"],
+          df[sample(624:696,19), "uniqhu"],
+          df[sample(697:916,57), "uniqhu"],
+          df[sample(917:1020,27), "uniqhu"],
+          df[sample(1021:1155,35), "uniqhu"],
+          df[sample(1156:1401,63), "uniqhu"],
+          df[sample(1402:1699,77), "uniqhu"],
+        
+          df[sample(1700:2025,84), "uniqhu"],
+          df[sample(2026:2367,88), "uniqhu"],
+          df[sample(2368:2767,103), "uniqhu"],
+          df[sample(2768:2974,53), "uniqhu"],
+          df[sample(2975:3354,98), "uniqhu"],
+          df[sample(3355:3514,41), "uniqhu"],
+          df[sample(3515:3715,52), "uniqhu"],
+          df[sample(3716:4319,156), "uniqhu"],
+          df[sample(4320:4444,32), "uniqhu"],
+          df[sample(4445:4650,53), "uniqhu"],
+          
+          df[sample(4651:5037,100), "uniqhu"],
+          df[sample(5038:5080,11), "uniqhu"],
+          df[sample(5081:5108,7), "uniqhu"],
+          df[sample(5109:5168,15), "uniqhu"],
+          df[sample(5169:5344,45), "uniqhu"],
+          df[sample(5345:5619,71), "uniqhu"],
+          df[sample(5620:5702,21), "uniqhu"],
+          df[sample(5703:5924,57), "uniqhu"],
+          df[sample(5925:5956,8), "uniqhu"])
+
+uniqhu<-as.data.frame(uniqhu)
+uniqhu$selected_SSU2<-1
+
+CDO_SSU_Sample4<-left_join(CDO_SSU_Sample2,uniqhu)
+
+CDO_SSU<-subset(CDO_SSU_Sample4, is.na(CDO_SSU_Sample4$selected_SSU2)==FALSE)
+
+CDO_SSU2<-select(CDO_SSU, c(4,2,1,7:11))
+
+CDO_SSU3<-left_join(CDO_SSU_Frame,CDO_SSU2)
+CDO_SSU_Original<-subset(CDO_SSU3, is.na(CDO_SSU3$selected_SSU2)==FALSE)
+
+total_sample_HUs<-length(uniqhu$uniqhu)
+total_sample_HHs<-length(CDO_SSU_Original$uniqhu)
+
+flextable(head(CDO_SSU2))
+flextable(tail(CDO_SSU2))
+
+```
+
+## List of Final Sample SSUs
+
+The total number of selected sample housing units (SSU)for the province is **`r total_sample_HUs`** containing **`r total_sample_HHs`** total number of sample households.
+
+Below is a portion of the list of Final Sample housing units/households for the province showing the first and last five sample housing units/households in the list
+
+
+```{r}
+
+flextable(head(CDO_SSU_Original))
+flextable(tail(CDO_SSU_Original))
+```
+## Selection of Replacement SSUs
+For every sample grid a replacement of 3 SSUs are allotted. Below is the result of the sample selection process for the replacement SSUs 
+
+```{r}
+Replacement_Frame<-subset(CDO_SSU3, is.na(CDO_SSU3$selected_SSU2)==TRUE)
+
+Replacement_SSU<-left_join(df,uniqhu)
+Replacement_SSU2<-subset(Replacement_SSU,is.na(Replacement_SSU$selected_SSU2)==TRUE)
+Replacement_SSU2$count<-1
+
+Replacement_Grid<-Replacement_SSU2 %>%
+  group_by(Grid_no) %>%
+  summarise(TotalR_SSU=sum(count))
+
+Replacement_SSU3<-left_join(Replacement_SSU2, Replacement_Grid)
+
+Replacement_SSU4<-select(Replacement_SSU3, c(1:3,8))
+
+Replacement_SSU4$replacement<-ifelse(Replacement_SSU4$TotalR_SSU>=3,3,Replacement_SSU4$TotalR_SSU)
+
+Replacement_Certainty<-subset(Replacement_SSU4, Replacement_SSU4$replacement<3)
+
+Replacement_SSU5<-subset(Replacement_SSU4, Replacement_SSU4$replacement==3)
+
+Replacement_SSU6<-Replacement_SSU5 %>%
+  group_by(Grid_no) %>%
+  sample_n(3)
+
+Replacement_Final<-rbind(Replacement_SSU6, Replacement_Certainty)
+
+flextable(head(Replacement_Final))
+flextable(tail(Replacement_Final))
+
+```
+
+## List of Final Replacement SSUs
+
+```{r}
+
+Replacement_Final2<-select(Replacement_Final, c(1:3))
+
+Replacement_Final2$replacement<-2
+
+Replacement_SSU7<-left_join(Replacement_Frame, Replacement_Final2, by="uniqhu")
+
+Replacement_SSU8<-subset(Replacement_SSU7, is.na(Replacement_SSU7$replacement)==FALSE)
+
+Replacement_SSU8$selected_SSU2=Replacement_SSU8$replacement
+Replacement_SSU8$SamplePSU_ID.x=Replacement_SSU8$SamplePSU_ID.y
+
+Replacement_SSU8<-select(Replacement_SSU8,c(1:31))
+
+Replacement_SSU9<-Replacement_SSU8 %>% 
+  rename(
+    Grid_no = Grid_no.x,
+    SamplePSU_ID = SamplePSU_ID.x
+    )
+
+flextable(head(Replacement_SSU9))
+flextable(tail(Replacement_SSU9))
+
+```
+
+## Resulting Output
+The CSV output of the drawn samples are stored in the output folder containing the following files: 
+
+* [Grid-based_Original_Sample_CDO.csv](https://drive.google.com/file/d/1_ECK_h3ZlPpicbM096bAtkDGFlXyHsCm/view?usp=sharing)
+* [Grid-based_Replacement_Sample_CDO.csv](https://drive.google.com/file/d/1BGUlGFZVuxu1T9QJMGuvvcLsY4d-Qt1S/view?usp=sharing)
+* [R Script and Other Datafile Resources](https://drive.google.com/drive/folders/1AAF-QLjaQLif4O5Tza_i4qYa7zQ3Ov1i?usp=sharing)
+
+```{r}
+Output_Path1<-"Output/Grid_based_Original_Sample_CDO.csv"
+Output_Path2<-"Output/Grid_based_Replacement_Sample_CDO.csv"
+
+write.csv(CDO_SSU_Original, Output_Path1, row.names = FALSE)
+write.csv(Replacement_SSU9, Output_Path2, row.names = FALSE)
+
+```
